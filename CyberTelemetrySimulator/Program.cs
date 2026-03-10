@@ -7,13 +7,41 @@ using CyberTelemetrySimulator.Models;
 using CyberTelemetrySimulator.Publishers;
 using CyberTelemetrySimulator.Validation;
 
-var settingsPath = Path.Combine(AppContext.BaseDirectory, "Config", "simulatorSettings.json"); //used to load conf settings from json file
-var settingsJson = File.ReadAllText(settingsPath); //read the JSON file content into a string
-var settings = JsonSerializer.Deserialize<SimulatorSettings>(
-    settingsJson,
-    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
-) ?? new SimulatorSettings(); //convert the JSON string into a SimulatorSettings object, if deserialization fails, create a new SimulatorSettings with default values
+var configFolder = Path.Combine(AppContext.BaseDirectory, "Config");
+var baseSettingsPath = Path.Combine(configFolder, "simulatorSettings.json");
+var localSettingsPath = Path.Combine(configFolder, "simulatorSettings.local.json");
 
+var jsonOptions = new JsonSerializerOptions
+{
+    PropertyNameCaseInsensitive = true
+};
+
+var settings = new SimulatorSettings();
+
+// Load base settings first
+if (File.Exists(baseSettingsPath))
+{
+    var baseSettingsJson = File.ReadAllText(baseSettingsPath);
+    settings = JsonSerializer.Deserialize<SimulatorSettings>(baseSettingsJson, jsonOptions)
+               ?? new SimulatorSettings();
+}
+else
+{
+    Console.WriteLine($"Missing required config file: {baseSettingsPath}");
+    return;
+}
+
+// Then load local settings and override only the secret if present
+if (File.Exists(localSettingsPath))
+{
+    var localSettingsJson = File.ReadAllText(localSettingsPath);
+    var localSettings = JsonSerializer.Deserialize<SimulatorSettings>(localSettingsJson, jsonOptions);
+
+    if (localSettings != null && !string.IsNullOrWhiteSpace(localSettings.IotHubDeviceConnectionString))
+    {
+        settings.IotHubDeviceConnectionString = localSettings.IotHubDeviceConnectionString;
+    }
+}
 
 var socMode = args.Contains("--soc", StringComparer.OrdinalIgnoreCase);
 var demoMode = args.Contains("--demo", StringComparer.OrdinalIgnoreCase);
