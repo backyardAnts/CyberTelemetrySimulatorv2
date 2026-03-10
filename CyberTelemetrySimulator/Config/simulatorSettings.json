@@ -1,0 +1,23 @@
+{
+  "tickMs": 2000,
+  "attackChancePerTick": 0.35,
+  "minDurationSec": 30,
+  "maxDurationSec": 90,
+  "outputPath": "data/raw-telemetry.jsonl",
+  "balancedDatasetMode": true,
+  "trainingDatasetMode": false,
+  "trainingEpisodeDurationSec": 60,
+  "businessHoursStart": 9,
+  "businessHoursEnd": 17,
+  "dayBaselineMultiplier": 1.3,
+  "nightBaselineMultiplier": 0.7,
+  "afterHoursAttackMultiplier": 2.0,
+  "targetClassRatios": {
+    "Normal": 0.65,
+    "BruteForce": 0.12,
+    "PortScan": 0.12,
+    "DDoS": 0.06,
+    "Exfiltration": 0.05
+  },
+  "totalEventsTarget": 200000
+}
