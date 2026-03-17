@@ -13,11 +13,11 @@
   "nightBaselineMultiplier": 0.7,
   "afterHoursAttackMultiplier": 2.0,
   "targetClassRatios": {
-    "Normal": 0.65,
-    "BruteForce": 0.12,
-    "PortScan": 0.12,
-    "DDoS": 0.06,
-    "Exfiltration": 0.05
+    "Normal": 0.80,
+    "BruteForce": 0.04,
+    "PortScan": 0.04,
+    "DDoS": 0.05,
+    "Exfiltration": 0.02
   },
   
   "totalEventsTarget": 200000

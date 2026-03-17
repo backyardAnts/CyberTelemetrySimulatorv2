@@ -31,6 +31,15 @@ public class CampaignManager
     private readonly int? _totalEventsTarget;
     private readonly Dictionary<AttackType, int> _generatedCounts;
     private int _eventsGenerated;
+    private static readonly (AttackType Type, double Weight)[] _simulationLabelWeights =
+    {
+        (AttackType.Normal, 0.85),
+        (AttackType.DDoS, 0.05),
+        (AttackType.BruteForce, 0.04),
+        (AttackType.PortScan, 0.04),
+        (AttackType.Exfiltration, 0.02)
+    };
+    private static readonly double _simulationWeightTotal = ValidateSimulationLabelWeights();
     private readonly AttackType[] _trainingSchedule =
     {
         AttackType.Normal,
@@ -239,22 +248,14 @@ public class CampaignManager
             return balancedEpisode;
         }
 
-        // Start a new one with some probability
-        var attackChance = _attackChancePerTick;
-        if (IsAfterHours(nowUtc))
-        {
-            attackChance *= _afterHoursAttackMultiplier;
-        }
-
-        attackChance = Math.Clamp(attackChance, 0.0, 1.0);
-        if (_random.NextDouble() > attackChance)
+        var type = SelectSimulationLabel();
+        if (type == AttackType.Normal)
         {
             IncrementCount(AttackType.Normal);
             return null;
         }
 
         var duration = _random.Next(_minDurationSec, _maxDurationSec + 1);
-        var type = RandomAttackType();
         var mode = RandomAttackMode(type);
         var intensity = RandomIntensity(mode, type);
         var (clusters, clusterSize) = SourceIpClustering(type, mode);
@@ -318,6 +319,22 @@ public class CampaignManager
         // exclude Normal
         var options = new[] { AttackType.PortScan, AttackType.BruteForce, AttackType.DDoS, AttackType.Exfiltration };
         return options[_random.Next(options.Length)];
+    }
+
+    private AttackType SelectSimulationLabel()
+    {
+        var roll = _random.NextDouble() * _simulationWeightTotal;
+        var cumulative = 0.0;
+        foreach (var (type, weight) in _simulationLabelWeights)
+        {
+            cumulative += weight;
+            if (roll <= cumulative)
+            {
+                return type;
+            }
+        }
+
+        return _simulationLabelWeights[^1].Type;
     }
 
     private AttackType? SelectBalancedAttackType()
@@ -453,6 +470,17 @@ public class CampaignManager
         }
 
         return parsed.ToDictionary(kvp => kvp.Key, kvp => kvp.Value / total);
+    }
+
+    private static double ValidateSimulationLabelWeights()
+    {
+        var sum = _simulationLabelWeights.Sum(entry => entry.Weight);
+        if (Math.Abs(sum - 1.0) > 1e-6)
+        {
+            throw new InvalidOperationException($"Simulation label probabilities must sum to 1.0 (got {sum:0.000000}).");
+        }
+
+        return sum;
     }
 
     private static SimulatorSettings? LoadSettings()
