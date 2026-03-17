@@ -10,6 +10,7 @@ namespace CyberTelemetrySimulator.Campaigns;
 //owns the list/queue of AttackEpisodes, decides what’s active right now, and tells AttackApplier what to apply.
 using CyberTelemetrySimulator.Config;
 using CyberTelemetrySimulator.Models;
+using CyberTelemetrySimulator.Utils;
 
 public class CampaignManager
 {
@@ -27,6 +28,7 @@ public class CampaignManager
     private readonly int _businessHoursStart;
     private readonly int _businessHoursEnd;
     private readonly double _afterHoursAttackMultiplier;
+    private readonly TimeOfDayService _timeOfDay;
     private readonly Dictionary<AttackType, double> _targetRatios;
     private readonly int? _totalEventsTarget;
     private readonly Dictionary<AttackType, int> _generatedCounts;
@@ -95,9 +97,10 @@ public class CampaignManager
         _balancedDatasetMode = balancedDatasetMode ?? settings?.BalancedDatasetMode ?? false;
         _trainingDatasetMode = trainingDatasetMode ?? settings?.TrainingDatasetMode ?? false;
         _trainingEpisodeDurationSec = trainingEpisodeDurationSec ?? settings?.TrainingEpisodeDurationSec ?? 60;
-        _businessHoursStart = NormalizeHour(businessHoursStart ?? settings?.BusinessHoursStart ?? 9);
-        _businessHoursEnd = NormalizeHour(businessHoursEnd ?? settings?.BusinessHoursEnd ?? 17);
+        _businessHoursStart = TimeOfDayService.NormalizeHour(businessHoursStart ?? settings?.BusinessHoursStart ?? 9);
+        _businessHoursEnd = TimeOfDayService.NormalizeHour(businessHoursEnd ?? settings?.BusinessHoursEnd ?? 17);
         _afterHoursAttackMultiplier = Math.Max(0.1, afterHoursAttackMultiplier ?? settings?.AfterHoursAttackMultiplier ?? 2.0);
+        _timeOfDay = new TimeOfDayService(settings);
         _targetRatios = ResolveTargetRatios(targetClassRatios ?? settings?.TargetClassRatios);
         _totalEventsTarget = totalEventsTarget ?? settings?.TotalEventsTarget;
         _generatedCounts = Enum.GetValues<AttackType>().ToDictionary(type => type, _ => 0);
@@ -385,29 +388,7 @@ public class CampaignManager
 
     private bool IsAfterHours(DateTime nowUtc)
     {
-        return !IsWithinBusinessHours(nowUtc.Hour, _businessHoursStart, _businessHoursEnd);
-    }
-
-    private static bool IsWithinBusinessHours(int hour, int businessHoursStart, int businessHoursEnd)
-    {
-        if (businessHoursStart == businessHoursEnd)
-        {
-            return true;
-        }
-
-        if (businessHoursStart < businessHoursEnd)
-        {
-            return hour >= businessHoursStart && hour < businessHoursEnd;
-        }
-
-        return hour >= businessHoursStart || hour < businessHoursEnd;
-    }
-
-    private static int NormalizeHour(int hour)
-    {
-        if (hour < 0) return 0;
-        if (hour > 23) return 23;
-        return hour;
+        return _timeOfDay.IsAfterHours(nowUtc, _businessHoursStart, _businessHoursEnd);
     }
 
     private string FormatCounts()

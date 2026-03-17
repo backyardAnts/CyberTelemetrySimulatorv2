@@ -22,6 +22,7 @@ public class DeviceSimulator
     private readonly int _businessHoursEnd;
     private readonly double _dayBaselineMultiplier;
     private readonly double _nightBaselineMultiplier;
+    private readonly TimeOfDayService _timeOfDay;
 
     public string DeviceId { get; }
     public DeviceType DeviceType { get; }
@@ -30,10 +31,11 @@ public class DeviceSimulator
     {
         DeviceId = deviceId;
         DeviceType = deviceType;
-        _businessHoursStart = NormalizeHour(settings?.BusinessHoursStart ?? 9);
-        _businessHoursEnd = NormalizeHour(settings?.BusinessHoursEnd ?? 17);
+        _businessHoursStart = TimeOfDayService.NormalizeHour(settings?.BusinessHoursStart ?? 9);
+        _businessHoursEnd = TimeOfDayService.NormalizeHour(settings?.BusinessHoursEnd ?? 17);
         _dayBaselineMultiplier = Math.Max(0.1, settings?.DayBaselineMultiplier ?? 1.3);
         _nightBaselineMultiplier = Math.Max(0.1, settings?.NightBaselineMultiplier ?? 0.7);
+        _timeOfDay = new TimeOfDayService(settings);
         _profile = DeviceProfile.For(deviceType);
         _baseline = InitializeBaseline();
         _packetRateState = _baseline.PacketRate;
@@ -113,7 +115,8 @@ public class DeviceSimulator
             _businessHoursStart,
             _businessHoursEnd,
             _dayBaselineMultiplier,
-            _nightBaselineMultiplier);
+            _nightBaselineMultiplier,
+            _timeOfDay);
 
         // AR(1) smoothing keeps rate/CPU evolution realistic between ticks.
 
@@ -157,7 +160,7 @@ public class DeviceSimulator
             OutgoingBytes = Math.Max(0, outgoing),
             IncomingBytes = Math.Max(0, incoming),
             AverageCpuUsage = Math.Clamp(_cpuUsageState, 0, 100),
-            TimeOfDay = now.Hour
+            TimeOfDay = _timeOfDay.GetHour(now)
         };
     }
 
@@ -167,9 +170,11 @@ public class DeviceSimulator
         int businessHoursStart,
         int businessHoursEnd,
         double dayBaselineMultiplier,
-        double nightBaselineMultiplier)
+        double nightBaselineMultiplier,
+        TimeOfDayService timeOfDay)
     {
-        var hour = now.Hour + now.Minute / 60.0;
+        var hour = timeOfDay.GetHourFraction(now);
+        var hourOfDay = timeOfDay.GetHour(now);
         var weekday = now.DayOfWeek is not DayOfWeek.Saturday and not DayOfWeek.Sunday;
 
         double baseMultiplier = deviceType switch
@@ -194,7 +199,7 @@ public class DeviceSimulator
         }
 
         var timeOfDayMultiplier = GetTimeOfDayBaselineMultiplier(
-            now,
+            hourOfDay,
             businessHoursStart,
             businessHoursEnd,
             dayBaselineMultiplier,
@@ -210,19 +215,18 @@ public class DeviceSimulator
     }
 
     private static double GetTimeOfDayBaselineMultiplier(
-        DateTime now,
+        int hour,
         int businessHoursStart,
         int businessHoursEnd,
         double dayBaselineMultiplier,
         double nightBaselineMultiplier)
     {
-        var hour = now.Hour;
         if (IsNightHour(hour))
         {
             return nightBaselineMultiplier;
         }
 
-        if (IsWithinBusinessHours(hour, businessHoursStart, businessHoursEnd))
+        if (TimeOfDayService.IsWithinBusinessHours(hour, businessHoursStart, businessHoursEnd))
         {
             return dayBaselineMultiplier;
         }
@@ -230,36 +234,9 @@ public class DeviceSimulator
         return 1.0;
     }
 
-    private static bool IsAfterHours(DateTime now, int businessHoursStart, int businessHoursEnd)
-    {
-        return !IsWithinBusinessHours(now.Hour, businessHoursStart, businessHoursEnd);
-    }
-
-    private static bool IsWithinBusinessHours(int hour, int businessHoursStart, int businessHoursEnd)
-    {
-        if (businessHoursStart == businessHoursEnd)
-        {
-            return true;
-        }
-
-        if (businessHoursStart < businessHoursEnd)
-        {
-            return hour >= businessHoursStart && hour < businessHoursEnd;
-        }
-
-        return hour >= businessHoursStart || hour < businessHoursEnd;
-    }
-
     private static bool IsNightHour(int hour)
     {
         return hour >= 0 && hour < 6;
-    }
-
-    private static int NormalizeHour(int hour)
-    {
-        if (hour < 0) return 0;
-        if (hour > 23) return 23;
-        return hour;
     }
 
     private void UpdateDerivedMetrics(Metrics m, DateTime now, bool forceAfterHours)
@@ -287,7 +264,7 @@ public class DeviceSimulator
         }
         else
         {
-            m.AfterHoursActivity = IsAfterHours(now, _businessHoursStart, _businessHoursEnd) ? 1 : 0;
+            m.AfterHoursActivity = _timeOfDay.IsAfterHours(now, _businessHoursStart, _businessHoursEnd) ? 1 : 0;
         }
     }
     public TelemetryEvent GenerateTelemetry(CampaignManager campaigns)

@@ -11,6 +11,8 @@
   "businessHoursEnd": 17,
   "dayBaselineMultiplier": 1.3,
   "nightBaselineMultiplier": 0.7,
+  "useManualTimeOfDay": true,
+  "manualHour": 10,
   "afterHoursAttackMultiplier": 2.0,
   "targetClassRatios": {
     "Normal": 0.80,

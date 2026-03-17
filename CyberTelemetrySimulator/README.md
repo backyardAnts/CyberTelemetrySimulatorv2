@@ -56,9 +56,12 @@ Configurable knobs in `Config/simulatorSettings.json`:
 - `businessHoursStart` / `businessHoursEnd` (defaults `9` and `17`)
 - `dayBaselineMultiplier` (default `1.3`)
 - `nightBaselineMultiplier` (default `0.7`)
+- `useManualTimeOfDay` (default `false`)
+- `manualHour` (0-23, default `0`)
 - `afterHoursAttackMultiplier` (default `2.0`)
 
 Effects:
 - Business hours raise baseline metrics (packet rate, traffic volume, new connections, successful logins, CPU).
 - Night hours (00:00–06:00) lower baseline metrics.
+- When `useManualTimeOfDay` is enabled, the simulator uses `manualHour` for TimeOfDay and after-hours logic.
 - Outside business hours, attack start probability is multiplied by `afterHoursAttackMultiplier` (clamped to 1.0).
