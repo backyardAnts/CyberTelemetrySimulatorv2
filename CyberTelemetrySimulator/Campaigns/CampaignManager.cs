@@ -31,14 +31,31 @@ public class CampaignManager
     private readonly int? _totalEventsTarget;
     private readonly Dictionary<AttackType, int> _generatedCounts;
     private int _eventsGenerated;
-    private readonly AttackType[] _trainingOrder =
+    private readonly AttackType[] _trainingSchedule =
     {
+        AttackType.Normal,
         AttackType.BruteForce,
         AttackType.PortScan,
         AttackType.DDoS,
-        AttackType.Exfiltration
+        AttackType.Normal,
+        AttackType.BruteForce,
+        AttackType.PortScan,
+        AttackType.DDoS,
+        AttackType.Normal,
+        AttackType.BruteForce,
+        AttackType.PortScan,
+        AttackType.DDoS,
+        AttackType.Normal,
+        AttackType.BruteForce,
+        AttackType.PortScan,
+        AttackType.DDoS,
+        AttackType.Normal,
+        AttackType.Normal,
+        AttackType.Exfiltration,
+        AttackType.Normal
     };
-    private int _trainingIndex;
+    private readonly Dictionary<string, int> _trainingIndices = new();
+    private readonly Dictionary<string, DateTime> _trainingNormalUntil = new();
 
     // Config knobs (we’ll move to Config later)
     private readonly double _attackChancePerTick; // chance to start an attack each telemetry tick
@@ -106,7 +123,20 @@ public class CampaignManager
 
         if (_trainingDatasetMode)
         {
-            var trainingType = NextTrainingAttackType();
+            if (_trainingNormalUntil.TryGetValue(deviceId, out var normalUntil) && nowUtc < normalUntil)
+            {
+                IncrementCount(AttackType.Normal);
+                return null;
+            }
+
+            var trainingType = NextTrainingAttackType(deviceId);
+            if (trainingType == AttackType.Normal)
+            {
+                _trainingNormalUntil[deviceId] = nowUtc.AddSeconds(_trainingEpisodeDurationSec);
+                IncrementCount(AttackType.Normal);
+                return null;
+            }
+
             var trainingMode = RandomAttackMode(trainingType);
             var trainingIntensity = RandomIntensity(trainingMode, trainingType);
             var (trainingClusters, trainingClusterSize) = SourceIpClustering(trainingType, trainingMode);
@@ -248,11 +278,39 @@ public class CampaignManager
         return ep;
     }
 
-    private AttackType NextTrainingAttackType()
+    private AttackType NextTrainingAttackType(string deviceId)
     {
-        var attackType = _trainingOrder[_trainingIndex];
-        _trainingIndex = (_trainingIndex + 1) % _trainingOrder.Length;
+        var index = GetTrainingIndex(deviceId);
+        var attackType = _trainingSchedule[index];
+        index = (index + 1) % _trainingSchedule.Length;
+        _trainingIndices[deviceId] = index;
         return attackType;
+    }
+
+    private int GetTrainingIndex(string deviceId)
+    {
+        if (_trainingIndices.TryGetValue(deviceId, out var index))
+        {
+            return index;
+        }
+
+        var hash = DeterministicHash(deviceId);
+        index = (hash & 0x7fffffff) % _trainingSchedule.Length;
+        _trainingIndices[deviceId] = index;
+        return index;
+    }
+
+    private static int DeterministicHash(string value)
+    {
+        unchecked
+        {
+            var hash = 17;
+            foreach (var ch in value)
+            {
+                hash = (hash * 31) + ch;
+            }
+            return hash;
+        }
     }
 
     private AttackType RandomAttackType()

@@ -19,5 +19,6 @@
     "DDoS": 0.06,
     "Exfiltration": 0.05
   },
+  
   "totalEventsTarget": 200000
 }
