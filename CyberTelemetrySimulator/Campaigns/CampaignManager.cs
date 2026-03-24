@@ -86,7 +86,8 @@ public class CampaignManager
         int? trainingEpisodeDurationSec = null,
         int? businessHoursStart = null,
         int? businessHoursEnd = null,
-        double? afterHoursAttackMultiplier = null)
+        double? afterHoursAttackMultiplier = null,
+        TimeOfDayService? timeOfDayService = null)
     {
         _attackChancePerTick = attackChancePerTick;
         _minDurationSec = minDurationSec;
@@ -100,7 +101,7 @@ public class CampaignManager
         _businessHoursStart = TimeOfDayService.NormalizeHour(businessHoursStart ?? settings?.BusinessHoursStart ?? 9);
         _businessHoursEnd = TimeOfDayService.NormalizeHour(businessHoursEnd ?? settings?.BusinessHoursEnd ?? 17);
         _afterHoursAttackMultiplier = Math.Max(0.1, afterHoursAttackMultiplier ?? settings?.AfterHoursAttackMultiplier ?? 2.0);
-        _timeOfDay = new TimeOfDayService(settings);
+        _timeOfDay = timeOfDayService ?? new TimeOfDayService(settings);
         _targetRatios = ResolveTargetRatios(targetClassRatios ?? settings?.TargetClassRatios);
         _totalEventsTarget = totalEventsTarget ?? settings?.TotalEventsTarget;
         _generatedCounts = Enum.GetValues<AttackType>().ToDictionary(type => type, _ => 0);

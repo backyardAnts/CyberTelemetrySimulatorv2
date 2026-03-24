@@ -27,7 +27,7 @@ public class DeviceSimulator
     public string DeviceId { get; }
     public DeviceType DeviceType { get; }
 
-    public DeviceSimulator(string deviceId, DeviceType deviceType, SimulatorSettings? settings = null)
+    public DeviceSimulator(string deviceId, DeviceType deviceType, SimulatorSettings? settings = null, TimeOfDayService? timeOfDay = null)
     {
         DeviceId = deviceId;
         DeviceType = deviceType;
@@ -35,7 +35,7 @@ public class DeviceSimulator
         _businessHoursEnd = TimeOfDayService.NormalizeHour(settings?.BusinessHoursEnd ?? 17);
         _dayBaselineMultiplier = Math.Max(0.1, settings?.DayBaselineMultiplier ?? 1.3);
         _nightBaselineMultiplier = Math.Max(0.1, settings?.NightBaselineMultiplier ?? 0.7);
-        _timeOfDay = new TimeOfDayService(settings);
+        _timeOfDay = timeOfDay ?? new TimeOfDayService(settings);
         _profile = DeviceProfile.For(deviceType);
         _baseline = InitializeBaseline();
         _packetRateState = _baseline.PacketRate;
@@ -47,6 +47,8 @@ public class DeviceSimulator
         var now = DateTime.UtcNow;
 
         var metrics = GenerateBaselineMetrics(now);
+        ApplyBackgroundAnomalies(metrics);
+        ApplyMetricNoise(metrics);
         UpdateDerivedMetrics(metrics, now, forceAfterHours: false);
 
         return new TelemetryEvent
@@ -109,6 +111,8 @@ public class DeviceSimulator
     private Metrics GenerateBaselineMetrics(DateTime now)
     {
         ApplyBaselineDrift();
+        var hourOfDay = _timeOfDay.GetHour(now);
+        var hourFraction = _timeOfDay.GetHourFraction(now);
         var activity = GetActivityMultiplier(
             now,
             DeviceType,
@@ -116,7 +120,7 @@ public class DeviceSimulator
             _businessHoursEnd,
             _dayBaselineMultiplier,
             _nightBaselineMultiplier,
-            _timeOfDay);
+            hourFraction);
 
         // AR(1) smoothing keeps rate/CPU evolution realistic between ticks.
 
@@ -160,7 +164,7 @@ public class DeviceSimulator
             OutgoingBytes = Math.Max(0, outgoing),
             IncomingBytes = Math.Max(0, incoming),
             AverageCpuUsage = Math.Clamp(_cpuUsageState, 0, 100),
-            TimeOfDay = _timeOfDay.GetHour(now)
+            TimeOfDay = hourOfDay
         };
     }
 
@@ -171,18 +175,16 @@ public class DeviceSimulator
         int businessHoursEnd,
         double dayBaselineMultiplier,
         double nightBaselineMultiplier,
-        TimeOfDayService timeOfDay)
+        double hourFraction)
     {
-        var hour = timeOfDay.GetHourFraction(now);
-        var hourOfDay = timeOfDay.GetHour(now);
         var weekday = now.DayOfWeek is not DayOfWeek.Saturday and not DayOfWeek.Sunday;
 
         double baseMultiplier = deviceType switch
         {
-            DeviceType.Workstation => DayNightCurve(hour, 0.35, 1.2),
-            DeviceType.WebServer => DayNightCurve(hour, 0.7, 1.05),
-            DeviceType.DatabaseServer => DayNightCurve(hour, 0.75, 1.05),
-            DeviceType.IoTDevice => DayNightCurve(hour, 0.9, 1.0),
+            DeviceType.Workstation => WorkstationCurve(hourFraction),
+            DeviceType.WebServer => DayNightCurve(hourFraction, 0.7, 1.05),
+            DeviceType.DatabaseServer => DayNightCurve(hourFraction, 0.75, 1.05),
+            DeviceType.IoTDevice => DayNightCurve(hourFraction, 0.9, 1.0),
             _ => 1.0
         };
 
@@ -198,8 +200,8 @@ public class DeviceSimulator
             };
         }
 
-        var timeOfDayMultiplier = GetTimeOfDayBaselineMultiplier(
-            hourOfDay,
+        var timeOfDayMultiplier = DiurnalBaselineMultiplier(
+            hourFraction,
             businessHoursStart,
             businessHoursEnd,
             dayBaselineMultiplier,
@@ -214,29 +216,69 @@ public class DeviceSimulator
         return nightMin + (dayMax - nightMin) * normalized;
     }
 
-    private static double GetTimeOfDayBaselineMultiplier(
-        int hour,
+    private static double DiurnalBaselineMultiplier(
+        double hourFraction,
         int businessHoursStart,
         int businessHoursEnd,
         double dayBaselineMultiplier,
         double nightBaselineMultiplier)
     {
-        if (IsNightHour(hour))
-        {
-            return nightBaselineMultiplier;
-        }
-
-        if (TimeOfDayService.IsWithinBusinessHours(hour, businessHoursStart, businessHoursEnd))
-        {
-            return dayBaselineMultiplier;
-        }
-
-        return 1.0;
+        var peakHour = (businessHoursStart + businessHoursEnd) / 2.0;
+        var radians = ((hourFraction - peakHour) / 24.0) * 2.0 * Math.PI;
+        var normalized = (Math.Cos(radians) + 1) / 2.0;
+        return nightBaselineMultiplier + (dayBaselineMultiplier - nightBaselineMultiplier) * normalized;
     }
 
-    private static bool IsNightHour(int hour)
+    private static double WorkstationCurve(double hourFraction)
     {
-        return hour >= 0 && hour < 6;
+        var morningRise = SmoothStep(6.5, 10.0, hourFraction);
+        var eveningDrop = 1 - SmoothStep(17.5, 20.5, hourFraction);
+        var plateau = Math.Min(morningRise, eveningDrop);
+        return 0.35 + (1.2 - 0.35) * plateau;
+    }
+
+    private static double SmoothStep(double edge0, double edge1, double x)
+    {
+        if (Math.Abs(edge1 - edge0) < 1e-6)
+        {
+            return x < edge0 ? 0.0 : 1.0;
+        }
+
+        var t = Math.Clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0);
+        return t * t * (3 - 2 * t);
+    }
+
+    private void ApplyBackgroundAnomalies(Metrics m)
+    {
+        if (_random.NextDouble() > 0.04)
+        {
+            return;
+        }
+
+        var spike = 1.0 + RandomDistributions.SampleNormal(_random, 0.15, 0.1);
+        m.AveragePacketRate = Math.Max(0, m.AveragePacketRate * spike);
+        m.ConnectionAttemptsPerSecond = Math.Max(0, m.ConnectionAttemptsPerSecond * spike);
+        m.NewConnectionsPerSecond = Math.Max(0, m.NewConnectionsPerSecond * spike);
+        m.UniquePortsAccessed = Math.Max(0, m.UniquePortsAccessed + _random.Next(2, 12));
+        m.TotalFailedLogins = Math.Max(0, m.TotalFailedLogins + _random.Next(0, 8));
+        m.IncomingBytes = Math.Max(0, m.IncomingBytes * (1.0 + 0.2 * spike));
+        m.OutgoingBytes = Math.Max(0, m.OutgoingBytes * (1.0 + 0.15 * spike));
+        m.AverageCpuUsage = Math.Clamp(m.AverageCpuUsage + RandomDistributions.SampleNormal(_random, 2, 3), 0, 100);
+    }
+
+    private void ApplyMetricNoise(Metrics m)
+    {
+        m.AveragePacketRate = Math.Max(0, m.AveragePacketRate + RandomDistributions.SampleNormal(_random, 0, Math.Max(4, m.AveragePacketRate * 0.08)));
+        m.TotalFailedLogins = Math.Max(0, (int)Math.Round(m.TotalFailedLogins + RandomDistributions.SampleNormal(_random, 0, Math.Max(1, m.TotalFailedLogins * 0.15))));
+        m.SuccessfulLogins = Math.Max(0, (int)Math.Round(m.SuccessfulLogins + RandomDistributions.SampleNormal(_random, 0, Math.Max(1, m.SuccessfulLogins * 0.12))));
+        m.UniqueSourceIps = Math.Max(1, (int)Math.Round(m.UniqueSourceIps + RandomDistributions.SampleNormal(_random, 0, Math.Max(1, m.UniqueSourceIps * 0.2))));
+        m.UniquePortsAccessed = Math.Max(0, (int)Math.Round(m.UniquePortsAccessed + RandomDistributions.SampleNormal(_random, 0, Math.Max(1, m.UniquePortsAccessed * 0.2))));
+        m.ConnectionAttemptsPerSecond = Math.Max(0, m.ConnectionAttemptsPerSecond + RandomDistributions.SampleNormal(_random, 0, Math.Max(1, m.ConnectionAttemptsPerSecond * 0.15)));
+        m.NewConnectionsPerSecond = Math.Max(0, m.NewConnectionsPerSecond + RandomDistributions.SampleNormal(_random, 0, Math.Max(1, m.NewConnectionsPerSecond * 0.15)));
+        m.AverageConnectionDurationMs = Math.Clamp(m.AverageConnectionDurationMs + RandomDistributions.SampleNormal(_random, 0, Math.Max(8, m.AverageConnectionDurationMs * 0.1)), 10, 20000);
+        m.IncomingBytes = Math.Max(0, m.IncomingBytes + RandomDistributions.SampleNormal(_random, 0, Math.Max(50, m.IncomingBytes * 0.1)));
+        m.OutgoingBytes = Math.Max(0, m.OutgoingBytes + RandomDistributions.SampleNormal(_random, 0, Math.Max(40, m.OutgoingBytes * 0.1)));
+        m.AverageCpuUsage = Math.Clamp(m.AverageCpuUsage + RandomDistributions.SampleNormal(_random, 0, 2.5), 0, 100);
     }
 
     private void UpdateDerivedMetrics(Metrics m, DateTime now, bool forceAfterHours)
@@ -264,7 +306,8 @@ public class DeviceSimulator
         }
         else
         {
-            m.AfterHoursActivity = _timeOfDay.IsAfterHours(now, _businessHoursStart, _businessHoursEnd) ? 1 : 0;
+            var hour = m.TimeOfDay;
+            m.AfterHoursActivity = TimeOfDayService.IsWithinBusinessHours(hour, _businessHoursStart, _businessHoursEnd) ? 0 : 1;
         }
     }
     public TelemetryEvent GenerateTelemetry(CampaignManager campaigns)
@@ -273,7 +316,7 @@ public class DeviceSimulator
 
         // 1) Generate normal baseline
         var metrics = GenerateBaselineMetrics(now);
-        UpdateDerivedMetrics(metrics, now, forceAfterHours: false);
+        ApplyBackgroundAnomalies(metrics);
 
         // 2) Check if there is an active attack episode, or start one
         var ep = campaigns.GetActiveEpisode(DeviceId, now) ?? campaigns.TryStartEpisode(DeviceId, now);
@@ -289,6 +332,7 @@ public class DeviceSimulator
             attackId = ep.AttackId;
         }
 
+        ApplyMetricNoise(metrics);
         UpdateDerivedMetrics(metrics, now, ep?.ForceAfterHours == true);
 
         // 4) Build event

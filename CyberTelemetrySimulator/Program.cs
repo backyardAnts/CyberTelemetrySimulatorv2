@@ -48,6 +48,8 @@ var demoMode = args.Contains("--demo", StringComparer.OrdinalIgnoreCase);
 var trainingMode = args.Contains("--training", StringComparer.OrdinalIgnoreCase);
 var iotHubEnabled = args.Contains("--iot-hub", StringComparer.OrdinalIgnoreCase);
 
+var timeOfDay = new CyberTelemetrySimulator.Utils.TimeOfDayService(settings);
+
 var campaigns = new CampaignManager( //attack scheduling manager, it will decide when to start an attack and what type based on the settings
     attackChancePerTick: settings.AttackChancePerTick, //gets the info from the settings file 
     minDurationSec: settings.MinDurationSec,
@@ -58,29 +60,30 @@ var campaigns = new CampaignManager( //attack scheduling manager, it will decide
     trainingEpisodeDurationSec: settings.TrainingEpisodeDurationSec,
     businessHoursStart: settings.BusinessHoursStart,
     businessHoursEnd: settings.BusinessHoursEnd,
-    afterHoursAttackMultiplier: settings.AfterHoursAttackMultiplier
+    afterHoursAttackMultiplier: settings.AfterHoursAttackMultiplier,
+    timeOfDayService: timeOfDay
 );
 
 var devices = new List<DeviceSimulator>(); //list of simulated devices, each with a unique ID and type. The DeviceSimulator class will use the DeviceProfile to generate telemetry data based on the device type and any active attack episodes.
 
 for (int i = 1; i <= 220; i++)
 {
-    devices.Add(new DeviceSimulator($"WS-{i:D3}", DeviceType.Workstation, settings));
+    devices.Add(new DeviceSimulator($"WS-{i:D3}", DeviceType.Workstation, settings, timeOfDay));
 }
 
 for (int i = 1; i <= 90; i++)
 {
-    devices.Add(new DeviceSimulator($"WEB-{i:D3}", DeviceType.WebServer, settings));
+    devices.Add(new DeviceSimulator($"WEB-{i:D3}", DeviceType.WebServer, settings, timeOfDay));
 }
 
 for (int i = 1; i <= 60; i++)
 {
-    devices.Add(new DeviceSimulator($"DB-{i:D3}", DeviceType.DatabaseServer, settings));
+    devices.Add(new DeviceSimulator($"DB-{i:D3}", DeviceType.DatabaseServer, settings, timeOfDay));
 }
 
 for (int i = 1; i <= 30; i++)
 {
-    devices.Add(new DeviceSimulator($"IOT-{i:D3}", DeviceType.IoTDevice, settings));
+    devices.Add(new DeviceSimulator($"IOT-{i:D3}", DeviceType.IoTDevice, settings, timeOfDay));
 }
 
 ITelemetryPublisher consolePub = new ConsolePublisher(); //publisher that outputs telemetry events to the console
@@ -170,6 +173,7 @@ while (true) //infinite loop that simulates the telemetry generation process. In
         }
     }
 
+    timeOfDay.AdvanceTime();
     await Task.Delay(settings.TickMs); //wait for a specified amount of time 
 }
 

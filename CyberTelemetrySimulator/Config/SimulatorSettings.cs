@@ -16,6 +16,8 @@ public class SimulatorSettings
     public int BusinessHoursEnd { get; set; } = 17;
     public double DayBaselineMultiplier { get; set; } = 1.3;
     public double NightBaselineMultiplier { get; set; } = 0.7;
+    public double HoursPerTick { get; set; } = 1.0;
+    public bool UseRandomTimeOfDay { get; set; } = false;
     public bool UseManualTimeOfDay { get; set; } = false;
     public int ManualHour { get; set; } = 0;
     public double AfterHoursAttackMultiplier { get; set; } = 2.0;

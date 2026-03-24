@@ -43,10 +43,7 @@ Campaigns/AttackApplier.cs
 
 Devices/DeviceSimulator.cs
 - Generates baseline metrics using statistical distributions (Poisson, log-normal, AR(1)).
-- Applies time-of-day multipliers to baseline activity:
-  - Business hours increase baseline traffic.
-  - Night hours lower baseline traffic.
-  - Transitional hours use the neutral multiplier.
+- Applies smooth diurnal curves to baseline activity (packet rate, traffic, connections, CPU).
 - Applies active attack effects and updates derived metrics (e.g., TrafficVolumeBytes).
 - Sets TimeOfDay (0–23) and AfterHoursActivity (0/1) without changing the telemetry schema.
 
@@ -86,6 +83,9 @@ Validation/TelemetrySelfCheck.cs
 
 Utils/RandomDistributions.cs
 - Statistical helpers (Poisson, log-normal, AR(1)) for realistic variability.
+
+Utils/TimeOfDayService.cs
+- Maintains a shared simulated clock with cyclic or random time-of-day modes.
 
 7) Publishing
 

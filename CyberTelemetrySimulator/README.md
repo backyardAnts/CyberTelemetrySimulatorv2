@@ -50,18 +50,21 @@ Set the device connection string with either of these:
 - `iotHubDeviceConnectionString` in `Config/simulatorSettings.json`
 
 ## Time-of-day realism
-Baseline traffic now shifts with time of day and attack likelihood increases after hours in production mode. These settings do not affect training mode.
+Baseline traffic shifts with a simulated clock and attack likelihood increases after hours in production mode.
 
 Configurable knobs in `Config/simulatorSettings.json`:
 - `businessHoursStart` / `businessHoursEnd` (defaults `9` and `17`)
 - `dayBaselineMultiplier` (default `1.3`)
 - `nightBaselineMultiplier` (default `0.7`)
+- `hoursPerTick` (default `1.0`)
+- `useRandomTimeOfDay` (default `false`)
 - `useManualTimeOfDay` (default `false`)
 - `manualHour` (0-23, default `0`)
 - `afterHoursAttackMultiplier` (default `2.0`)
 
 Effects:
-- Business hours raise baseline metrics (packet rate, traffic volume, new connections, successful logins, CPU).
-- Night hours (00:00–06:00) lower baseline metrics.
+- The simulator advances a cyclic clock by `hoursPerTick` each tick, wrapping 23 → 0.
+- Smooth diurnal curves scale packet rate, traffic volume, connections, and CPU usage.
+- When `useRandomTimeOfDay` is enabled, each tick samples a new hour instead of using the clock.
 - When `useManualTimeOfDay` is enabled, the simulator uses `manualHour` for TimeOfDay and after-hours logic.
 - Outside business hours, attack start probability is multiplied by `afterHoursAttackMultiplier` (clamped to 1.0).
