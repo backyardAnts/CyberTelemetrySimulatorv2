@@ -310,6 +310,125 @@ public class DeviceSimulator
             m.AfterHoursActivity = TimeOfDayService.IsWithinBusinessHours(hour, _businessHoursStart, _businessHoursEnd) ? 0 : 1;
         }
     }
+
+    public TelemetryEvent GenerateTrainingTelemetry(CampaignManager campaigns)
+    {
+        var now = DateTime.UtcNow;
+        var episode = campaigns.GetActiveEpisode(DeviceId, now) ?? campaigns.TryStartEpisode(DeviceId, now);
+        var label = episode?.AttackType ?? AttackType.Normal;
+        var metrics = GenerateTrainingMetrics(label, now);
+
+        UpdateDerivedMetrics(metrics, now, episode?.ForceAfterHours == true);
+
+        return new TelemetryEvent
+        {
+            Timestamp = now,
+            DeviceId = DeviceId,
+            DeviceType = DeviceType,
+            Metrics = metrics,
+            Label = label,
+            AttackId = episode?.AttackId,
+            AttackMode = episode?.Mode,
+            IncidentId = episode?.IncidentId
+        };
+    }
+
+    private Metrics GenerateTrainingMetrics(AttackType label, DateTime now)
+    {
+        var metrics = GenerateBaselineMetrics(now);
+
+        switch (label)
+        {
+            case AttackType.BruteForce:
+                metrics.TotalFailedLogins = Math.Max(
+                    20,
+                    (int)Math.Round(Math.Max(1, _profile.FailedLoginsRange.Max) * RandomBetween(18, 40)));
+                metrics.SuccessfulLogins = _random.Next(0, Math.Max(1, _profile.SuccessfulLoginsRange.Min + 1));
+                metrics.UniquePortsAccessed = RandomIntBetween(
+                    _profile.UniquePortsRange.Min,
+                    Math.Min(_profile.UniquePortsRange.Min + 1, _profile.UniquePortsRange.Max));
+                metrics.UniqueSourceIps = Math.Max(
+                    2,
+                    (int)Math.Round(_profile.UniqueSourceIpsRange.Max * RandomBetween(2.5, 4.5)));
+                metrics.ConnectionAttemptsPerSecond = NextScaled(metrics.ConnectionAttemptsPerSecond, 1.6, 3.2);
+                metrics.NewConnectionsPerSecond = NextScaled(metrics.NewConnectionsPerSecond, 1.4, 2.8);
+                metrics.AveragePacketRate = NextScaled(metrics.AveragePacketRate, 1.3, 2.3);
+                metrics.IncomingBytes = NextScaled(metrics.IncomingBytes, 0.85, 1.25);
+                metrics.OutgoingBytes = NextScaled(metrics.OutgoingBytes, 0.85, 1.2);
+                metrics.AverageCpuUsage = Math.Clamp(metrics.AverageCpuUsage + RandomBetween(8, 20), 0, 100);
+                break;
+
+            case AttackType.DDoS:
+                metrics.ConnectionAttemptsPerSecond = NextScaled(metrics.ConnectionAttemptsPerSecond, 8, 16);
+                metrics.NewConnectionsPerSecond = NextScaled(metrics.NewConnectionsPerSecond, 6, 14);
+                metrics.AveragePacketRate = NextScaled(metrics.AveragePacketRate, 7, 14);
+                metrics.UniqueSourceIps = Math.Max(
+                    20,
+                    (int)Math.Round(_profile.UniqueSourceIpsRange.Max * RandomBetween(8, 18)));
+                metrics.UniquePortsAccessed = Math.Max(
+                    metrics.UniquePortsAccessed,
+                    _profile.UniquePortsRange.Max + _random.Next(1, 4));
+                metrics.IncomingBytes = NextScaled(metrics.IncomingBytes, 6, 12);
+                metrics.OutgoingBytes = NextScaled(metrics.OutgoingBytes, 5, 10);
+                metrics.AverageConnectionDurationMs = RandomBetween(10, 120);
+                metrics.AverageCpuUsage = RandomBetween(80, 98);
+                break;
+
+            case AttackType.Exfiltration:
+                metrics.OutgoingBytes = NextScaled(metrics.OutgoingBytes, 6, 12);
+                metrics.IncomingBytes = NextScaled(metrics.IncomingBytes, 0.35, 0.75);
+                metrics.ConnectionAttemptsPerSecond = NextScaled(metrics.ConnectionAttemptsPerSecond, 1.2, 2.2);
+                metrics.NewConnectionsPerSecond = NextScaled(metrics.NewConnectionsPerSecond, 1.1, 1.9);
+                metrics.AveragePacketRate = NextScaled(metrics.AveragePacketRate, 1.3, 2.4);
+                metrics.UniquePortsAccessed = Math.Max(metrics.UniquePortsAccessed, _profile.UniquePortsRange.Max);
+                metrics.UniqueSourceIps = Math.Max(
+                    2,
+                    (int)Math.Round(_profile.UniqueSourceIpsRange.Max * RandomBetween(2, 4)));
+                metrics.AverageCpuUsage = RandomBetween(40, 75);
+                break;
+
+            case AttackType.PortScan:
+                metrics.UniquePortsAccessed = Math.Max(
+                    20,
+                    (int)Math.Round(_profile.UniquePortsRange.Max * RandomBetween(8, 16)));
+                metrics.ConnectionAttemptsPerSecond = NextScaled(metrics.ConnectionAttemptsPerSecond, 4, 8);
+                metrics.NewConnectionsPerSecond = NextScaled(metrics.NewConnectionsPerSecond, 4, 8);
+                metrics.AveragePacketRate = NextScaled(metrics.AveragePacketRate, 3, 6);
+                metrics.AverageConnectionDurationMs = RandomBetween(20, 200);
+                metrics.IncomingBytes = NextScaled(metrics.IncomingBytes, 1.2, 2.0);
+                metrics.OutgoingBytes = NextScaled(metrics.OutgoingBytes, 1.1, 1.8);
+                metrics.UniqueSourceIps = Math.Max(
+                    5,
+                    (int)Math.Round(_profile.UniqueSourceIpsRange.Max * RandomBetween(3, 6)));
+                metrics.AverageCpuUsage = Math.Clamp(metrics.AverageCpuUsage + RandomBetween(6, 18), 0, 100);
+                break;
+
+            case AttackType.Normal:
+            default:
+                break;
+        }
+
+        return metrics;
+    }
+
+    private double NextScaled(double value, double minMultiplier, double maxMultiplier)
+    {
+        return Math.Max(0, value * RandomBetween(minMultiplier, maxMultiplier));
+    }
+
+    private double RandomBetween(double min, double max)
+    {
+        return min + _random.NextDouble() * (max - min);
+    }
+
+    private int RandomIntBetween(int min, int max)
+    {
+        if (max < min)
+        {
+            (min, max) = (max, min);
+        }
+        return _random.Next(min, max + 1);
+    }
     public TelemetryEvent GenerateTelemetry(CampaignManager campaigns)
     {
         var now = DateTime.UtcNow;

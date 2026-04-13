@@ -47,6 +47,12 @@ var socMode = args.Contains("--soc", StringComparer.OrdinalIgnoreCase);
 var demoMode = args.Contains("--demo", StringComparer.OrdinalIgnoreCase);
 var trainingMode = args.Contains("--training", StringComparer.OrdinalIgnoreCase);
 var iotHubEnabled = args.Contains("--iot-hub", StringComparer.OrdinalIgnoreCase);
+var trainingDatasetMode = trainingMode || settings.TrainingDatasetMode;
+
+if (trainingDatasetMode && iotHubEnabled)
+{
+    Console.WriteLine("[MODE] Training telemetry will be sent to IoT Hub");
+}
 
 var timeOfDay = new CyberTelemetrySimulator.Utils.TimeOfDayService(settings);
 
@@ -56,7 +62,7 @@ var campaigns = new CampaignManager( //attack scheduling manager, it will decide
     maxDurationSec: settings.MaxDurationSec,
     incidentChainEnabled: socMode || demoMode,
     demoMode: demoMode,
-    trainingDatasetMode: trainingMode || settings.TrainingDatasetMode,
+    trainingDatasetMode: trainingDatasetMode,
     trainingEpisodeDurationSec: settings.TrainingEpisodeDurationSec,
     businessHoursStart: settings.BusinessHoursStart,
     businessHoursEnd: settings.BusinessHoursEnd,
@@ -113,7 +119,9 @@ while (true) //infinite loop that simulates the telemetry generation process. In
 {
     foreach (var d in devices)
     {
-        var evnt = d.GenerateTelemetry(campaigns);
+        var evnt = trainingDatasetMode
+            ? d.GenerateTrainingTelemetry(campaigns)
+            : d.GenerateTelemetry(campaigns);
         await filePub.PublishAsync(evnt); //publish content on file, the file publisher will append the telemetry event as a JSON line
 
         if (iotHubPublisher != null)
