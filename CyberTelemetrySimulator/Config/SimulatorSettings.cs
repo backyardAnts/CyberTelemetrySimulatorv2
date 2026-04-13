@@ -31,4 +31,6 @@ public class SimulatorSettings
         ["Exfiltration"] = 0.05
     };
     public int? TotalEventsTarget { get; set; }
+
+    public string? SqlConnectionString { get; set; }
 }
