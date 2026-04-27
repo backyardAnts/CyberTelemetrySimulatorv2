@@ -82,7 +82,7 @@ try
     if (args.Contains("--sql", StringComparer.OrdinalIgnoreCase))
     {
         sqlConnectionString =
-            secretClient.GetSecret("sql-connection-string").Value.Value;
+            secretClient.GetSecret("iot-connection-string-sql").Value.Value;
     }
 }
 catch (Exception ex)
