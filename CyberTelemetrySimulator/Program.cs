@@ -6,6 +6,12 @@ using CyberTelemetrySimulator.Detection;
 using CyberTelemetrySimulator.Models;
 using CyberTelemetrySimulator.Publishers;
 using CyberTelemetrySimulator.Validation;
+using Azure.Identity;
+using Azure.Security.KeyVault.Secrets;
+
+// --------------------
+// Load normal settings
+// --------------------
 
 var configFolder = Path.Combine(AppContext.BaseDirectory, "Config");
 var baseSettingsPath = Path.Combine(configFolder, "simulatorSettings.json");
@@ -18,7 +24,6 @@ var jsonOptions = new JsonSerializerOptions
 
 var settings = new SimulatorSettings();
 
-// Load base settings first
 if (File.Exists(baseSettingsPath))
 {
     var baseSettingsJson = File.ReadAllText(baseSettingsPath);
@@ -31,25 +36,65 @@ else
     return;
 }
 
-// Then load local settings and override secrets if present
+// --------------------
+// Load Key Vault URL
+// --------------------
+
+string? keyVaultUrl = null;
+
 if (File.Exists(localSettingsPath))
 {
     var localSettingsJson = File.ReadAllText(localSettingsPath);
-    var localSettings = JsonSerializer.Deserialize<SimulatorSettings>(localSettingsJson, jsonOptions);
+    var localConfig = JsonSerializer.Deserialize<Dictionary<string, string>>(localSettingsJson, jsonOptions);
 
-    if (localSettings != null)
+    if (localConfig != null && localConfig.TryGetValue("keyVaultUrl", out var vaultUrl))
     {
-        if (!string.IsNullOrWhiteSpace(localSettings.IotHubDeviceConnectionString))
-        {
-            settings.IotHubDeviceConnectionString = localSettings.IotHubDeviceConnectionString;
-        }
-
-        if (!string.IsNullOrWhiteSpace(localSettings.SqlConnectionString))
-        {
-            settings.SqlConnectionString = localSettings.SqlConnectionString;
-        }
+        keyVaultUrl = vaultUrl;
     }
 }
+
+if (string.IsNullOrWhiteSpace(keyVaultUrl))
+{
+    Console.WriteLine("Missing keyVaultUrl in Config/simulatorSettings.local.json");
+    return;
+}
+
+// --------------------
+// Load secrets from Azure Key Vault
+// --------------------
+
+var secretClient = new SecretClient(
+    new Uri(keyVaultUrl),
+    new DefaultAzureCredential()
+);
+
+string? iotHubDeviceConnectionString = null;
+string? sqlConnectionString = null;
+
+try
+{
+    if (args.Contains("--iot-hub", StringComparer.OrdinalIgnoreCase))
+    {
+        iotHubDeviceConnectionString =
+            secretClient.GetSecret("iot-connection-string").Value.Value;
+    }
+
+    if (args.Contains("--sql", StringComparer.OrdinalIgnoreCase))
+    {
+        sqlConnectionString =
+            secretClient.GetSecret("sql-connection-string").Value.Value;
+    }
+}
+catch (Exception ex)
+{
+    Console.WriteLine("Failed to load secrets from Azure Key Vault.");
+    Console.WriteLine(ex.Message);
+    return;
+}
+
+// --------------------
+// App modes
+// --------------------
 
 if (args.Contains("--self-check", StringComparer.OrdinalIgnoreCase))
 {
@@ -62,6 +107,10 @@ var demoMode = args.Contains("--demo", StringComparer.OrdinalIgnoreCase);
 var trainingMode = args.Contains("--training", StringComparer.OrdinalIgnoreCase);
 var iotHubEnabled = args.Contains("--iot-hub", StringComparer.OrdinalIgnoreCase);
 var sqlEnabled = args.Contains("--sql", StringComparer.OrdinalIgnoreCase);
+
+// --------------------
+// Simulator setup
+// --------------------
 
 var timeOfDay = new CyberTelemetrySimulator.Utils.TimeOfDayService(settings);
 
@@ -101,46 +150,45 @@ for (int i = 1; i <= 3; i++)
     devices.Add(new DeviceSimulator($"IOT-{i:D3}", DeviceType.IoTDevice, settings, timeOfDay));
 }
 
+// --------------------
+// Publishers
+// --------------------
+
 ITelemetryPublisher consolePub = new ConsolePublisher();
 ITelemetryPublisher filePub = new FileJsonlPublisher(settings.OutputPath);
+
 var alertPublisher = socMode ? new AlertJsonlPublisher("data/alerts.jsonl") : null;
 var deviceStates = socMode ? new Dictionary<string, DeviceSecurityState>() : null;
 
 AzureIotHubPublisher? iotHubPublisher = null;
+
 if (iotHubEnabled)
 {
-    var iotHubConnectionString = Environment.GetEnvironmentVariable("IOT_HUB_DEVICE_CONNECTION_STRING");
-    if (string.IsNullOrWhiteSpace(iotHubConnectionString))
+    if (string.IsNullOrWhiteSpace(iotHubDeviceConnectionString))
     {
-        iotHubConnectionString = settings.IotHubDeviceConnectionString;
-    }
-
-    if (string.IsNullOrWhiteSpace(iotHubConnectionString))
-    {
-        Console.WriteLine("Missing IoT Hub device connection string. Set IOT_HUB_DEVICE_CONNECTION_STRING or Config/simulatorSettings.json / simulatorSettings.local.json.");
+        Console.WriteLine("Missing IoT Hub device connection string from Key Vault.");
         return;
     }
 
-    iotHubPublisher = new AzureIotHubPublisher(iotHubConnectionString);
+    iotHubPublisher = new AzureIotHubPublisher(iotHubDeviceConnectionString);
 }
 
 SqlTelemetryPublisher? sqlPublisher = null;
+
 if (sqlEnabled)
 {
-    var sqlConnectionString = Environment.GetEnvironmentVariable("SQL_CONNECTION_STRING");
     if (string.IsNullOrWhiteSpace(sqlConnectionString))
     {
-        sqlConnectionString = settings.SqlConnectionString;
-    }
-
-    if (string.IsNullOrWhiteSpace(sqlConnectionString))
-    {
-        Console.WriteLine("Missing SQL connection string. Set SQL_CONNECTION_STRING or Config/simulatorSettings.json / simulatorSettings.local.json.");
+        Console.WriteLine("Missing SQL connection string from Key Vault.");
         return;
     }
 
     sqlPublisher = new SqlTelemetryPublisher(sqlConnectionString);
 }
+
+// --------------------
+// Main loop
+// --------------------
 
 while (true)
 {
@@ -161,10 +209,6 @@ while (true)
             await iotHubPublisher.PublishAsync(evnt);
             Console.WriteLine($"[DEBUG] Sent to IoT Hub: {evnt.DeviceId}");
         }
-        else
-        {
-            Console.WriteLine("[DEBUG] IoT Hub publisher is null");
-        }
 
         if (!socMode)
         {
@@ -174,6 +218,7 @@ while (true)
 
         var detection = DetectionEngine.Evaluate(evnt);
         var state = MapState(detection.RiskScore);
+
         var emoji = state switch
         {
             DeviceSecurityState.Normal => "Normal",
@@ -182,14 +227,20 @@ while (true)
             _ => "Well IDK"
         };
 
-        var reasons = detection.Reasons.Length == 0 ? "none" : string.Join("; ", detection.Reasons);
+        var reasons = detection.Reasons.Length == 0
+            ? "none"
+            : string.Join("; ", detection.Reasons);
+
         var suspectedLabel = detection.SuspectedType?.ToString() ?? "None";
 
-        Console.WriteLine($"[{emoji}] {evnt.DeviceId} {evnt.DeviceType} Risk={detection.RiskScore} Suspected={suspectedLabel} Reasons={reasons}");
+        Console.WriteLine(
+            $"[{emoji}] {evnt.DeviceId} {evnt.DeviceType} Risk={detection.RiskScore} Suspected={suspectedLabel} Reasons={reasons}"
+        );
 
         if (deviceStates != null)
         {
             deviceStates.TryGetValue(evnt.DeviceId, out var previousState);
+
             if (previousState != state)
             {
                 deviceStates[evnt.DeviceId] = state;
