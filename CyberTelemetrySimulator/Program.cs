@@ -81,22 +81,22 @@ var campaigns = new CampaignManager(
 
 var devices = new List<DeviceSimulator>();
 
-for (int i = 1; i <= 220; i++)
+for (int i = 1; i <= 20; i++)
 {
     devices.Add(new DeviceSimulator($"WS-{i:D3}", DeviceType.Workstation, settings, timeOfDay));
 }
 
-for (int i = 1; i <= 90; i++)
+for (int i = 1; i <= 8; i++)
 {
     devices.Add(new DeviceSimulator($"WEB-{i:D3}", DeviceType.WebServer, settings, timeOfDay));
 }
 
-for (int i = 1; i <= 60; i++)
+for (int i = 1; i <= 5; i++)
 {
     devices.Add(new DeviceSimulator($"DB-{i:D3}", DeviceType.DatabaseServer, settings, timeOfDay));
 }
 
-for (int i = 1; i <= 30; i++)
+for (int i = 1; i <= 3; i++)
 {
     devices.Add(new DeviceSimulator($"IOT-{i:D3}", DeviceType.IoTDevice, settings, timeOfDay));
 }
@@ -157,7 +157,13 @@ while (true)
 
         if (iotHubPublisher != null)
         {
+            Console.WriteLine($"[DEBUG] Sending to IoT Hub: {evnt.DeviceId} {evnt.DeviceType}");
             await iotHubPublisher.PublishAsync(evnt);
+            Console.WriteLine($"[DEBUG] Sent to IoT Hub: {evnt.DeviceId}");
+        }
+        else
+        {
+            Console.WriteLine("[DEBUG] IoT Hub publisher is null");
         }
 
         if (!socMode)

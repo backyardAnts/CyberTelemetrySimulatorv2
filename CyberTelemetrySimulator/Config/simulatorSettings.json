@@ -12,8 +12,8 @@
   "dayBaselineMultiplier": 1.3,
   "nightBaselineMultiplier": 0.7,
   "hoursPerTick": 1.0,
-  "useRandomTimeOfDay": true,
-  "useManualTimeOfDay": false,
+  "useRandomTimeOfDay": false,
+  "useManualTimeOfDay": true,
   "manualHour": 10,
   "afterHoursAttackMultiplier": 2.0,
   "targetClassRatios": {
