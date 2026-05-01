@@ -1,0 +1,8 @@
+streamlit
+streamlit-autorefresh
+pandas
+requests
+azure-eventhub
+azure-identity
+azure-keyvault-secrets
+azure-storage-blob
